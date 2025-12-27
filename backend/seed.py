@@ -37,12 +37,25 @@ def seed_if_empty():
     if cursor.fetchone()["count"] == 0:
         cursor.executemany(
             """
-            INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, start_date, end_date, deposit, status, remark)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, start_date, end_date, deposit, status, remark)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("京A12345", "丰田凯美瑞", "张三", "13800001111", "2023-01-01", "2024-01-01", "5000", "unsettled", ""),
-                ("沪B54321", "本田雅阁", "李四", "13900002222", "2023-06-01", "2024-06-01", "4000", "unsettled", ""),
+                ("京A12345", "丰田凯美瑞", "张三", "13800001111", "王五", "2023-01-01", "2024-01-01", "5000", "unsettled", ""),
+                ("沪B54321", "本田雅阁", "李四", "13900002222", "赵六", "2023-06-01", "2024-06-01", "4000", "unsettled", ""),
+            ],
+        )
+
+    cursor.execute("SELECT COUNT(*) AS count FROM vehicles")
+    if cursor.fetchone()["count"] == 0:
+        cursor.executemany(
+            """
+            INSERT INTO vehicles (plate, car_type, last_inspection, last_insurance, is_rented, condition_remark)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("吉A12345", "红旗EH7", "2024-06-01", "2024-05-15", 1, "轻微划痕"),
+                ("吉A54321", "比亚迪", "2024-04-10", "2024-03-28", 0, "车况良好"),
             ],
         )
 

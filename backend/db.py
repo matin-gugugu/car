@@ -57,11 +57,26 @@ def init_db():
             car_type TEXT NOT NULL,
             driver_name TEXT NOT NULL,
             driver_phone TEXT NOT NULL,
+            operator_name TEXT DEFAULT '',
             start_date TEXT,
             end_date TEXT,
             deposit TEXT,
             status TEXT DEFAULT 'unsettled',
             remark TEXT DEFAULT ''
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vehicles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate TEXT NOT NULL,
+            car_type TEXT NOT NULL,
+            last_inspection TEXT,
+            last_insurance TEXT,
+            is_rented INTEGER DEFAULT 0,
+            condition_remark TEXT DEFAULT ''
         )
         """
     )
@@ -72,6 +87,19 @@ def init_db():
         cursor.execute("ALTER TABLE rental_orders ADD COLUMN status TEXT DEFAULT 'unsettled'")
     if "remark" not in columns:
         cursor.execute("ALTER TABLE rental_orders ADD COLUMN remark TEXT DEFAULT ''")
+    if "operator_name" not in columns:
+        cursor.execute("ALTER TABLE rental_orders ADD COLUMN operator_name TEXT DEFAULT ''")
+
+    cursor.execute("PRAGMA table_info(vehicles)")
+    vehicle_columns = {row["name"] for row in cursor.fetchall()}
+    if "last_inspection" not in vehicle_columns:
+        cursor.execute("ALTER TABLE vehicles ADD COLUMN last_inspection TEXT")
+    if "last_insurance" not in vehicle_columns:
+        cursor.execute("ALTER TABLE vehicles ADD COLUMN last_insurance TEXT")
+    if "is_rented" not in vehicle_columns:
+        cursor.execute("ALTER TABLE vehicles ADD COLUMN is_rented INTEGER DEFAULT 0")
+    if "condition_remark" not in vehicle_columns:
+        cursor.execute("ALTER TABLE vehicles ADD COLUMN condition_remark TEXT DEFAULT ''")
 
     conn.commit()
     conn.close()

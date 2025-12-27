@@ -1,0 +1,12 @@
+.rental-order-actions {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.rental-order-actions .action-btn {
+  padding: 0 4px;
+  height: 24px;
+  line-height: 24px;
+  min-width: 40px;
+}

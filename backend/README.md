@@ -22,6 +22,10 @@ The server runs on `http://localhost:5001`.
 - POST `/api/rental-orders`
 - PUT `/api/rental-orders/<id>`
 - DELETE `/api/rental-orders/<id>`
+- GET `/api/vehicles?plate=...&carType=...&isRented=0|1`
+- POST `/api/vehicles`
+- PUT `/api/vehicles/<id>`
+- DELETE `/api/vehicles/<id>`
 
 ## Notes
 

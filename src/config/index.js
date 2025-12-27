@@ -7,11 +7,18 @@ export default  [
         url: '/home/index'
     },
     {
-        path: '/vehicleManagement',
-        name: 'vehicleManagement',
+        path: '/rental-orders',
+        name: 'rentalOrderManagement',
         label: '租赁订单管理',
         icon: 'CarOutlined',
-        url: '/vehicleManagement/index'
+        url: '/rental-orders/index'
+    },
+    {
+        path: '/vehicles',
+        name: 'vehicleManagement',
+        label: '车辆管理',
+        icon: 'CarOutlined',
+        url: '/vehicles/index'
     },
     {
         path: '/userManagement',
