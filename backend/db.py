@@ -64,7 +64,22 @@ def init_db():
             deposit TEXT,
             rent TEXT DEFAULT '',
             status TEXT DEFAULT 'unsettled',
-            remark TEXT DEFAULT ''
+            remark TEXT DEFAULT '',
+            rent_dates TEXT DEFAULT '',
+            rent_status TEXT DEFAULT ''
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rent_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            due_date TEXT NOT NULL,
+            status TEXT DEFAULT 'unsettled',
+            remark TEXT DEFAULT '',
+            FOREIGN KEY (order_id) REFERENCES rental_orders(id)
         )
         """
     )
@@ -95,6 +110,17 @@ def init_db():
         cursor.execute("ALTER TABLE rental_orders ADD COLUMN rent TEXT DEFAULT ''")
     if "contract_month" not in columns:
         cursor.execute("ALTER TABLE rental_orders ADD COLUMN contract_month TEXT DEFAULT ''")
+    if "rent_dates" not in columns:
+        cursor.execute("ALTER TABLE rental_orders ADD COLUMN rent_dates TEXT DEFAULT ''")
+    if "rent_status" not in columns:
+        cursor.execute("ALTER TABLE rental_orders ADD COLUMN rent_status TEXT DEFAULT ''")
+
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS rent_records_order_due_unique
+        ON rent_records(order_id, due_date)
+        """
+    )
 
     cursor.execute("PRAGMA table_info(vehicles)")
     vehicle_columns = {row["name"] for row in cursor.fetchall()}
@@ -144,7 +170,10 @@ def init_db():
             WHEN EXISTS (
                 SELECT 1 FROM rental_orders r
                 WHERE r.plate = vehicles.plate
-                  AND r.status != 'settled'
+                  AND r.start_date != ''
+                  AND r.end_date != ''
+                  AND date(r.start_date) <= date('now')
+                  AND date(r.end_date) > date('now')
             ) THEN 1
             ELSE 0
         END

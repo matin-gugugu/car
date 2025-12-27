@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Form, Input, Table, Modal, message, DatePicker, Tag, Popover, Select } from "antd";
+import { Button, Form, Input, Table, Modal, message, DatePicker, Popover, Select, Tag } from "antd";
 import dayjs from "dayjs";
 import http from "../../api/axios";  
 import "./rentalOrderManagement.css";
@@ -24,6 +24,7 @@ const RentalOrderManagement = () => {
 
   // 删除弹窗相关
   const [deleteId, setDeleteId] = useState(null);
+  const [deleteRow, setDeleteRow] = useState(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
 
   const columns = [
@@ -60,13 +61,18 @@ const RentalOrderManagement = () => {
     },
     { title: '司机电话', dataIndex: 'driverPhone', key: 'driverPhone', align: 'center' },
     { title: '经办人', dataIndex: 'operatorName', key: 'operatorName', align: 'center' },
-    { title: '年月', dataIndex: 'contractMonth', key: 'contractMonth', align: 'center' },
+    {
+      title: '收租日期',
+      dataIndex: 'rentDueDate',
+      key: 'rentDueDate',
+      align: 'center',
+    },
     { title: '押金', dataIndex: 'deposit', key: 'deposit', align: 'center' },
     { title: '租金', dataIndex: 'rent', key: 'rent', align: 'center' },
     {
-      title: '订单状态',
-      dataIndex: 'status',
-      key: 'status',
+      title: '收租状态',
+      dataIndex: 'rentRecordStatus',
+      key: 'rentRecordStatus',
       align: 'center',
       render: (val) =>
         val === 'settled' ? (
@@ -83,40 +89,42 @@ const RentalOrderManagement = () => {
         <div className="rental-order-actions">
           <Button type="link" className="action-btn" onClick={() => handleSettle(row)}>结算</Button>
           <Button type="link" className="action-btn" onClick={() => openEditModal(row)}>编辑</Button>
-          <Button type="link" className="action-btn" danger onClick={() => showDeleteModal(row.id)}>删除</Button>
+          <Button type="link" className="action-btn" danger onClick={() => showDeleteModal(row)}>删除</Button>
         </div>
       )
     }
     ,
     {
       title: '备注',
-      dataIndex: 'remark',
-      key: 'remark',
+      dataIndex: 'rentRecordRemark',
+      key: 'rentRecordRemark',
       align: 'center',
       render: (_, row) => (
         <Popover
           trigger="click"
-          open={remarkEditingId === row.id}
+          open={remarkEditingId === row.rentRecordId}
           onOpenChange={async (open) => {
             if (open) {
-              setRemarkEditingId(row.id);
-              setRemarkDraft(row.remark || "");
+              setRemarkEditingId(row.rentRecordId);
+              setRemarkDraft(row.rentRecordRemark || "");
               return;
             }
-            if (remarkEditingId !== row.id) return;
+            if (remarkEditingId !== row.rentRecordId) return;
             const nextRemark = (remarkDraft || "").trim();
-            const prevRemark = row.remark || "";
+            const prevRemark = row.rentRecordRemark || "";
             setRemarkEditingId(null);
             if (nextRemark === prevRemark) return;
             try {
               await http.request({
-                url: `/rental-orders/${row.id}`,
+                url: `/rent-records/${row.rentRecordId}`,
                 method: "put",
                 data: { remark: nextRemark },
               });
               setTableData((prev) =>
                 prev.map((item) =>
-                  item.id === row.id ? { ...item, remark: nextRemark } : item
+                  item.rentRecordId === row.rentRecordId
+                    ? { ...item, rentRecordRemark: nextRemark }
+                    : item
                 )
               );
             } catch (err) {
@@ -141,10 +149,10 @@ const RentalOrderManagement = () => {
               overflow: "hidden",
               textOverflow: "ellipsis",
               cursor: "pointer",
-              color: row.remark ? "inherit" : "#999",
+              color: row.rentRecordRemark ? "inherit" : "#999",
             }}
           >
-            {row.remark || "点击填写"}
+            {row.rentRecordRemark || "点击填写"}
           </div>
         </Popover>
       ),
@@ -152,17 +160,17 @@ const RentalOrderManagement = () => {
   ];
 
   const handleSettle = (row) => {
-    if (row.status === 'settled') {
-      message.info("该订单已结算");
+    if (row.rentRecordStatus === 'settled') {
+      message.info("该收租记录已结清");
       return;
     }
     setSettleRow(row);
     setIsSettleModalVisible(true);
   };
 
-  const settleOrder = async (rowId) => {
+  const settleOrder = async (row) => {
     await http.request({
-      url: `/rental-orders/${rowId}`,
+      url: `/rent-records/${row.rentRecordId}`,
       method: "put",
       data: { status: "settled" },
     });
@@ -180,15 +188,13 @@ const RentalOrderManagement = () => {
           driverName: settleRow.driverName,
           driverPhone: settleRow.driverPhone,
           operatorName: settleRow.operatorName || "",
-          contractMonth: settleRow.contractMonth || "",
           startDate: "",
           endDate: "",
           deposit: "",
           rent: "",
-          status: "unsettled",
         },
       });
-      await settleOrder(settleRow.id);
+      await settleOrder(settleRow);
       message.success("已续租并结算当前租期");
       setIsSettleModalVisible(false);
       setSettleRow(null);
@@ -202,7 +208,7 @@ const RentalOrderManagement = () => {
   const handleNoRenew = async () => {
     if (!settleRow) return;
     try {
-      await settleOrder(settleRow.id);
+      await settleOrder(settleRow);
       message.success("已结算");
       setIsSettleModalVisible(false);
       setSettleRow(null);
@@ -234,10 +240,14 @@ const RentalOrderManagement = () => {
   const getTableData = async (params = {}) => {
     try {
       const res = await http.request({
-        url: "/rental-orders",
+        url: "/rent-records",
         method: "get",
         params,
       });
+      const hasUnsettled = (row) => {
+        return row.rentRecordStatus !== "settled";
+      };
+
       const sorted = (res.list || []).slice().sort((a, b) => {
         const plateCompare = (a.plate || "").localeCompare(b.plate || "");
         if (plateCompare !== 0) return plateCompare;
@@ -245,17 +255,17 @@ const RentalOrderManagement = () => {
         const carTypeCompare = (a.carType || "").localeCompare(b.carType || "");
         if (carTypeCompare !== 0) return carTypeCompare;
 
-        const statusA = a.status === "settled" ? 1 : 0;
-        const statusB = b.status === "settled" ? 1 : 0;
+        const statusA = hasUnsettled(a) ? 0 : 1;
+        const statusB = hasUnsettled(b) ? 0 : 1;
         if (statusA !== statusB) return statusA - statusB;
 
-        const endA = dayjs(a.endDate || 0).valueOf();
-        const endB = dayjs(b.endDate || 0).valueOf();
-        return endB - endA;
+        const dueA = dayjs(a.rentDueDate || 0).valueOf();
+        const dueB = dayjs(b.rentDueDate || 0).valueOf();
+        return dueB - dueA;
       });
       setTableData(sorted);
     } catch (e) {
-      console.error("获取车辆列表失败:", e);
+      console.error("获取收租记录失败:", e);
     }
   };
 
@@ -305,7 +315,7 @@ const RentalOrderManagement = () => {
           message.success("新增成功");
         } else {
           await http.request({
-            url: `/rental-orders/${editingRow.id}`,
+            url: `/rental-orders/${editingRow.orderId}`,
             method: "put",
             data: payload,
           });
@@ -324,21 +334,53 @@ const RentalOrderManagement = () => {
   };
 
   // 删除
-  const showDeleteModal = (id) => {
-    setDeleteId(id);
+  const showDeleteModal = (row) => {
+    setDeleteId(row.rentRecordId);
+    setDeleteRow(row);
     setIsDeleteModalVisible(true);
   };
 
   const handleDeleteOk = () => {
     http
       .request({
-        url: `/rental-orders/${deleteId}`,
+        url: `/rent-records/${deleteId}`,
         method: "delete",
       })
-      .then(() => {
-        setIsDeleteModalVisible(false);
-        message.success("删除成功");
-        getTableData(query);
+      .then((res) => {
+        const { remaining, orderId } = res || {};
+        if (remaining === 0 && deleteRow) {
+          Modal.confirm({
+            title: `此记录为“${deleteRow.plate}”车辆的“${deleteRow.startDate} ~ ${deleteRow.endDate}”订单的最后一条收租记录，是否同时删除该笔订单记录？`,
+            okText: "确认",
+            cancelText: "取消",
+            onOk: () => {
+              http
+                .request({
+                  url: `/rental-orders/${orderId}/with-records`,
+                  method: "delete",
+                })
+                .then(() => {
+                  message.success("订单已删除");
+                  setIsDeleteModalVisible(false);
+                  setDeleteRow(null);
+                  getTableData(query);
+                })
+                .catch((e) => {
+                  console.error("删除订单失败:", e);
+                });
+            },
+            onCancel: () => {
+              setIsDeleteModalVisible(false);
+              setDeleteRow(null);
+              getTableData(query);
+            },
+          });
+        } else {
+          setIsDeleteModalVisible(false);
+          setDeleteRow(null);
+          message.success("删除成功");
+          getTableData(query);
+        }
       })
       .catch((e) => {
         console.error("删除失败:", e);
@@ -396,7 +438,7 @@ const RentalOrderManagement = () => {
       <Table
         columns={columns}
         dataSource={tableData}
-        rowKey="id"
+        rowKey="rentRecordId"
         pagination={false}
         rowClassName={(record) =>
           plateShadeMap.get(record.plate || "") === 1 ? "plate-shade-row" : ""
@@ -467,9 +509,6 @@ const RentalOrderManagement = () => {
           </Form.Item>
           <Form.Item label="经办人" name="operatorName" rules={[{ required: true, message: '请输入经办人' }]}>
             <Input />
-          </Form.Item>
-          <Form.Item label="年月" name="contractMonth" rules={[{ required: true, message: '请输入年月' }]}>
-            <Input placeholder="YYYY-MM" />
           </Form.Item>
           <Form.Item label="起租日期" name="startDate" rules={[{ required: true, message: '请选择起租日期' }]}>
             <DatePicker style={{ width: '100%' }} />

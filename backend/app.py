@@ -2,6 +2,9 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from db import get_db, init_db
 from seed import seed_if_empty
+import calendar
+import json
+from datetime import date, datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -9,6 +12,71 @@ CORS(app)
 # Flask 3 移除了 before_first_request，启动时直接初始化即可
 init_db()
 seed_if_empty()
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _add_months(d, months):
+    year = d.year + (d.month - 1 + months) // 12
+    month = (d.month - 1 + months) % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(d.day, last_day)
+    return date(year, month, day)
+
+
+def _build_due_dates(start_date, end_date):
+    if not start_date or not end_date:
+        return []
+    dates = []
+    current = start_date
+    while current < end_date:
+        dates.append(current)
+        current = _add_months(current, 1)
+    return dates
+
+
+def _ensure_rent_records(order_id, start_date_str, end_date_str):
+    start_date = _parse_date(start_date_str)
+    end_date = _parse_date(end_date_str)
+    if not start_date or not end_date:
+        return
+
+    all_due = _build_due_dates(start_date, end_date)
+    if not all_due:
+        return
+
+    today = date.today()
+    wanted = []
+    next_due = None
+    for due in all_due:
+        if due <= today:
+            wanted.append(due)
+        else:
+            next_due = due
+            break
+
+    if next_due:
+        wanted.append(next_due)
+
+    if not wanted:
+        return
+
+    db = get_db()
+    db.executemany(
+        """
+        INSERT OR IGNORE INTO rent_records (order_id, due_date, status, remark)
+        VALUES (?, ?, 'unsettled', '')
+        """,
+        [(order_id, d.isoformat()) for d in wanted],
+    )
+    db.commit()
 
 
 @app.get("/api/health")
@@ -93,9 +161,7 @@ def rental_order_list():
         """
         SELECT id, plate, car_type AS carType, driver_name AS driverName,
                driver_phone AS driverPhone, operator_name AS operatorName,
-               contract_month AS contractMonth,
-               start_date AS startDate, end_date AS endDate, deposit, rent,
-               status, remark
+               start_date AS startDate, end_date AS endDate, deposit, rent
         FROM rental_orders
         """
         + where_sql
@@ -119,9 +185,7 @@ def rental_order_create():
     if missing:
         return jsonify({"code": 400, "message": f"missing fields: {', '.join(missing)}"}), 400
 
-    status = payload.get("status") or "unsettled"
     operator_name = payload.get("operatorName") or ""
-    contract_month = payload.get("contractMonth") or ""
     start_date = payload.get("startDate") or ""
     end_date = payload.get("endDate") or ""
     deposit = payload.get("deposit") or ""
@@ -141,8 +205,8 @@ def rental_order_create():
 
     cursor = db.execute(
         """
-        INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, contract_month, start_date, end_date, deposit, rent, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, start_date, end_date, deposit, rent, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload["plate"],
@@ -150,15 +214,15 @@ def rental_order_create():
             payload["driverName"],
             payload["driverPhone"],
             operator_name,
-            contract_month,
             start_date,
             end_date,
             deposit,
             rent,
-            status,
+            "unsettled",
         ),
     )
     db.commit()
+    _ensure_rent_records(cursor.lastrowid, start_date, end_date)
     return jsonify({"code": 200, "id": cursor.lastrowid})
 
 
@@ -171,13 +235,10 @@ def rental_order_update(order_id):
         "driverName": "driver_name",
         "driverPhone": "driver_phone",
         "operatorName": "operator_name",
-        "contractMonth": "contract_month",
         "startDate": "start_date",
         "endDate": "end_date",
         "deposit": "deposit",
         "rent": "rent",
-        "status": "status",
-        "remark": "remark",
     }
 
     fields = []
@@ -219,12 +280,132 @@ def rental_order_update(order_id):
         params,
     )
     db.commit()
+    if "startDate" in payload or "endDate" in payload:
+        cursor = db.execute(
+            "SELECT start_date, end_date FROM rental_orders WHERE id = ?",
+            (order_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            _ensure_rent_records(order_id, row["start_date"], row["end_date"])
     return jsonify({"code": 200, "message": "updated"})
 
 
 @app.delete("/api/rental-orders/<int:order_id>")
 def rental_order_delete(order_id):
     db = get_db()
+    db.execute("DELETE FROM rent_records WHERE order_id = ?", (order_id,))
+    db.execute("DELETE FROM rental_orders WHERE id = ?", (order_id,))
+    db.commit()
+    return jsonify({"code": 200, "message": "deleted"})
+
+
+@app.get("/api/rent-records")
+def rent_record_list():
+    plate = request.args.get("plate")
+    driver_name = request.args.get("driverName")
+    operator_name = request.args.get("operatorName")
+
+    db = get_db()
+    clauses = []
+    params = []
+    if plate:
+        clauses.append("r.plate LIKE ?")
+        params.append(f"%{plate}%")
+    if driver_name:
+        clauses.append("r.driver_name LIKE ?")
+        params.append(f"%{driver_name}%")
+    if operator_name:
+        clauses.append("r.operator_name LIKE ?")
+        params.append(f"%{operator_name}%")
+
+    where_sql = ""
+    if clauses:
+        where_sql = " WHERE " + " AND ".join(clauses)
+
+    order_cursor = db.execute(
+        """
+        SELECT id, start_date, end_date
+        FROM rental_orders
+        """
+        + where_sql.replace("r.", ""),
+        params,
+    )
+    for row in order_cursor.fetchall():
+        _ensure_rent_records(row["id"], row["start_date"], row["end_date"])
+
+    cursor = db.execute(
+        """
+        SELECT r.id AS orderId, r.plate, r.car_type AS carType,
+               r.driver_name AS driverName, r.driver_phone AS driverPhone,
+               r.operator_name AS operatorName, r.start_date AS startDate,
+               r.end_date AS endDate, r.deposit, r.rent,
+               rr.id AS rentRecordId, rr.due_date AS rentDueDate,
+               rr.status AS rentRecordStatus, rr.remark AS rentRecordRemark
+        FROM rental_orders r
+        JOIN rent_records rr ON rr.order_id = r.id
+        """
+        + where_sql
+        + " ORDER BY r.id ASC, rr.due_date ASC",
+        params,
+    )
+    data = [dict(row) for row in cursor.fetchall()]
+    return jsonify({"code": 200, "list": data})
+
+
+@app.put("/api/rent-records/<int:record_id>")
+def rent_record_update(record_id):
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "status": "status",
+        "remark": "remark",
+    }
+    fields = []
+    params = []
+    for key, column in allowed.items():
+        if key in payload:
+            fields.append(f"{column} = ?")
+            params.append(payload[key])
+
+    if not fields:
+        return jsonify({"code": 400, "message": "no fields to update"}), 400
+
+    params.append(record_id)
+    db = get_db()
+    db.execute(
+        f"UPDATE rent_records SET {', '.join(fields)} WHERE id = ?",
+        params,
+    )
+    db.commit()
+    return jsonify({"code": 200, "message": "updated"})
+
+
+@app.delete("/api/rent-records/<int:record_id>")
+def rent_record_delete(record_id):
+    db = get_db()
+    cursor = db.execute(
+        "SELECT order_id FROM rent_records WHERE id = ?",
+        (record_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return jsonify({"code": 404, "message": "rent record not found"}), 404
+
+    db.execute("DELETE FROM rent_records WHERE id = ?", (record_id,))
+    db.commit()
+
+    cursor = db.execute(
+        "SELECT COUNT(*) AS count FROM rent_records WHERE order_id = ?",
+        (row["order_id"],),
+    )
+    remaining = cursor.fetchone()["count"]
+    return jsonify({"code": 200, "message": "deleted", "orderId": row["order_id"], "remaining": remaining})
+
+
+@app.delete("/api/rental-orders/<int:order_id>/with-records")
+def rental_order_delete_with_records(order_id):
+    db = get_db()
+    db.execute("DELETE FROM rent_records WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM rental_orders WHERE id = ?", (order_id,))
     db.commit()
     return jsonify({"code": 200, "message": "deleted"})

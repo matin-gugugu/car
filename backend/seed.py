@@ -37,12 +37,12 @@ def seed_if_empty():
     if cursor.fetchone()["count"] == 0:
         cursor.executemany(
             """
-            INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, contract_month, start_date, end_date, deposit, rent, status, remark)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, contract_month, start_date, end_date, deposit, rent, status, remark, rent_dates, rent_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                ("京A12345", "丰田凯美瑞", "张三", "13800001111", "王五", "2025-12", "2023-01-01", "2024-01-01", "5000", "800", "unsettled", ""),
-                ("沪B54321", "本田雅阁", "李四", "13900002222", "赵六", "2025-06", "2023-06-01", "2024-06-01", "4000", "700", "unsettled", ""),
+                ("京A12345", "丰田凯美瑞", "张三", "13800001111", "王五", "2025-12", "2023-01-01", "2024-01-01", "5000", "800", "unsettled", "", "", ""),
+                ("沪B54321", "本田雅阁", "李四", "13900002222", "赵六", "2025-06", "2023-06-01", "2024-06-01", "4000", "700", "unsettled", "", "", ""),
             ],
         )
 
