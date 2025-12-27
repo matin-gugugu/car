@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Button, Form, Input, Table, Modal, message, DatePicker, Tag, Popover } from "antd";
+import React, { useEffect, useMemo, useState } from "react";
+import { Button, Form, Input, Table, Modal, message, DatePicker, Tag, Popover, Select } from "antd";
 import dayjs from "dayjs";
 import http from "../../api/axios";  
 import "./rentalOrderManagement.css";
@@ -19,46 +19,50 @@ const RentalOrderManagement = () => {
   const [settleRow, setSettleRow] = useState(null);
   const [remarkEditingId, setRemarkEditingId] = useState(null);
   const [remarkDraft, setRemarkDraft] = useState("");
+  const [vehicleOptions, setVehicleOptions] = useState([]);
+  const [selectedPlate, setSelectedPlate] = useState("");
 
   // 删除弹窗相关
   const [deleteId, setDeleteId] = useState(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
 
   const columns = [
-    { title: '车牌号', dataIndex: 'plate', key: 'plate', align: 'center' },
+    {
+      title: '车牌号',
+      dataIndex: 'plate',
+      key: 'plate',
+      align: 'center',
+      render: (_, row) => {
+        const periodText = row.startDate && row.endDate
+          ? `${row.startDate} ~ ${row.endDate}`
+          : "未设置";
+        return (
+          <Popover
+            trigger="click"
+            content={<div style={{ maxWidth: 220 }}>{periodText}</div>}
+          >
+            <span style={{ cursor: "pointer" }}>{row.plate}</span>
+          </Popover>
+        );
+      },
+    },
     {
       title: '车型信息',
       dataIndex: 'carType',
       key: 'carType',
       align: 'center',
-      sorter: (a, b) => (a.carType || '').localeCompare(b.carType || ''),
     },
     {
       title: '司机姓名',
       dataIndex: 'driverName',
       key: 'driverName',
       align: 'center',
-      sorter: (a, b) => (a.driverName || '').localeCompare(b.driverName || ''),
     },
     { title: '司机电话', dataIndex: 'driverPhone', key: 'driverPhone', align: 'center' },
     { title: '经办人', dataIndex: 'operatorName', key: 'operatorName', align: 'center' },
-    {
-      title: '起租日期',
-      dataIndex: 'startDate',
-      key: 'startDate',
-      align: 'center',
-      sorter: (a, b) =>
-        dayjs(a.startDate || 0).valueOf() - dayjs(b.startDate || 0).valueOf(),
-    },
-    {
-      title: '到期日期',
-      dataIndex: 'endDate',
-      key: 'endDate',
-      align: 'center',
-      sorter: (a, b) =>
-        dayjs(a.endDate || 0).valueOf() - dayjs(b.endDate || 0).valueOf(),
-    },
+    { title: '年月', dataIndex: 'contractMonth', key: 'contractMonth', align: 'center' },
     { title: '押金', dataIndex: 'deposit', key: 'deposit', align: 'center' },
+    { title: '租金', dataIndex: 'rent', key: 'rent', align: 'center' },
     {
       title: '订单状态',
       dataIndex: 'status',
@@ -176,9 +180,11 @@ const RentalOrderManagement = () => {
           driverName: settleRow.driverName,
           driverPhone: settleRow.driverPhone,
           operatorName: settleRow.operatorName || "",
+          contractMonth: settleRow.contractMonth || "",
           startDate: "",
           endDate: "",
           deposit: "",
+          rent: "",
           status: "unsettled",
         },
       });
@@ -212,6 +218,18 @@ const RentalOrderManagement = () => {
     setSettleRow(null);
   };
 
+  const loadVehicles = async () => {
+    try {
+      const res = await http.request({
+        url: "/vehicles",
+        method: "get",
+      });
+      setVehicleOptions(res.list || []);
+    } catch (e) {
+      console.error("获取车辆列表失败:", e);
+    }
+  };
+
   // 获取列表数据
   const getTableData = async (params = {}) => {
     try {
@@ -221,15 +239,19 @@ const RentalOrderManagement = () => {
         params,
       });
       const sorted = (res.list || []).slice().sort((a, b) => {
+        const plateCompare = (a.plate || "").localeCompare(b.plate || "");
+        if (plateCompare !== 0) return plateCompare;
+
+        const carTypeCompare = (a.carType || "").localeCompare(b.carType || "");
+        if (carTypeCompare !== 0) return carTypeCompare;
+
         const statusA = a.status === "settled" ? 1 : 0;
         const statusB = b.status === "settled" ? 1 : 0;
         if (statusA !== statusB) return statusA - statusB;
 
         const endA = dayjs(a.endDate || 0).valueOf();
         const endB = dayjs(b.endDate || 0).valueOf();
-        if (endA !== endB) return endA - endB;
-
-        return (a.plate || "").localeCompare(b.plate || "");
+        return endB - endA;
       });
       setTableData(sorted);
     } catch (e) {
@@ -248,6 +270,7 @@ const RentalOrderManagement = () => {
     setModalMode("edit");
     setEditingRow(row);
     setIsEditModalVisible(true);
+    setSelectedPlate(row.plate || "");
     // 处理日期为 dayjs 对象
     editForm.setFieldsValue({
       ...row,
@@ -260,6 +283,7 @@ const RentalOrderManagement = () => {
     setModalMode("add");
     setEditingRow(null);
     setIsEditModalVisible(true);
+    setSelectedPlate("");
     editForm.resetFields();
   };
 
@@ -327,7 +351,21 @@ const RentalOrderManagement = () => {
 
   useEffect(() => {
     getTableData();
+    loadVehicles();
   }, []);
+
+  const plateShadeMap = useMemo(() => {
+    const map = new Map();
+    let flag = 0;
+    for (const item of tableData) {
+      const plate = item.plate || "";
+      if (!map.has(plate)) {
+        map.set(plate, flag);
+        flag = flag === 0 ? 1 : 0;
+      }
+    }
+    return map;
+  }, [tableData]);
 
   return (
     <div>
@@ -360,6 +398,9 @@ const RentalOrderManagement = () => {
         dataSource={tableData}
         rowKey="id"
         pagination={false}
+        rowClassName={(record) =>
+          plateShadeMap.get(record.plate || "") === 1 ? "plate-shade-row" : ""
+        }
       />
 
       <Modal
@@ -389,11 +430,34 @@ const RentalOrderManagement = () => {
           layout="vertical"
           initialValues={{}}
 >
-          <Form.Item label="车牌号" name="plate" rules={[{ required: true, message: '请输入车牌号' }]}>
-            <Input />
+          <Form.Item label="车牌号" name="plate" rules={[{ required: true, message: '请选择车牌号' }]}>
+            <Select
+              showSearch
+              placeholder="请选择车牌号"
+              onChange={(value) => {
+                setSelectedPlate(value || "");
+                const match = vehicleOptions.find((item) => item.plate === value);
+                if (match && match.carType) {
+                  editForm.setFieldsValue({ carType: match.carType });
+                }
+              }}
+              options={[...new Set(vehicleOptions.map((item) => item.plate))].map((plate) => ({
+                value: plate,
+                label: plate,
+              }))}
+            />
           </Form.Item>
-          <Form.Item label="车型信息" name="carType" rules={[{ required: true, message: '请输入车型信息' }]}>
-            <Input />
+          <Form.Item label="车型信息" name="carType" rules={[{ required: true, message: '请选择车型信息' }]}>
+            <Select
+              showSearch
+              placeholder="请选择车型信息"
+              options={vehicleOptions
+                .filter((item) => (selectedPlate ? item.plate === selectedPlate : true))
+                .map((item) => ({
+                  value: item.carType,
+                  label: item.carType,
+                }))}
+            />
           </Form.Item>
           <Form.Item label="司机姓名" name="driverName" rules={[{ required: true, message: '请输入司机姓名' }]}>
             <Input />
@@ -404,6 +468,9 @@ const RentalOrderManagement = () => {
           <Form.Item label="经办人" name="operatorName" rules={[{ required: true, message: '请输入经办人' }]}>
             <Input />
           </Form.Item>
+          <Form.Item label="年月" name="contractMonth" rules={[{ required: true, message: '请输入年月' }]}>
+            <Input placeholder="YYYY-MM" />
+          </Form.Item>
           <Form.Item label="起租日期" name="startDate" rules={[{ required: true, message: '请选择起租日期' }]}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
@@ -411,6 +478,9 @@ const RentalOrderManagement = () => {
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label="押金" name="deposit" rules={[{ required: true, message: '请输入押金' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="租金" name="rent" rules={[{ required: true, message: '请输入租金' }]}>
             <Input />
           </Form.Item>
         </Form>

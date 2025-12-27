@@ -10,3 +10,15 @@
   line-height: 24px;
   min-width: 40px;
 }
+
+.plate-shade-row > td {
+  background-color: #f7f7f7;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td {
+  background-color: #eaf2ff;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr.plate-shade-row:hover > td {
+  background-color: #eaf2ff;
+}

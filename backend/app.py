@@ -93,7 +93,8 @@ def rental_order_list():
         """
         SELECT id, plate, car_type AS carType, driver_name AS driverName,
                driver_phone AS driverPhone, operator_name AS operatorName,
-               start_date AS startDate, end_date AS endDate, deposit,
+               contract_month AS contractMonth,
+               start_date AS startDate, end_date AS endDate, deposit, rent,
                status, remark
         FROM rental_orders
         """
@@ -120,14 +121,28 @@ def rental_order_create():
 
     status = payload.get("status") or "unsettled"
     operator_name = payload.get("operatorName") or ""
+    contract_month = payload.get("contractMonth") or ""
     start_date = payload.get("startDate") or ""
     end_date = payload.get("endDate") or ""
     deposit = payload.get("deposit") or ""
+    rent = payload.get("rent") or ""
+
     db = get_db()
     cursor = db.execute(
         """
-        INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, start_date, end_date, deposit, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        SELECT 1 FROM vehicles
+        WHERE plate = ? AND car_type = ?
+        LIMIT 1
+        """,
+        (payload["plate"], payload["carType"]),
+    )
+    if cursor.fetchone() is None:
+        return jsonify({"code": 400, "message": "vehicle not found in vehicles table"}), 400
+
+    cursor = db.execute(
+        """
+        INSERT INTO rental_orders (plate, car_type, driver_name, driver_phone, operator_name, contract_month, start_date, end_date, deposit, rent, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload["plate"],
@@ -135,9 +150,11 @@ def rental_order_create():
             payload["driverName"],
             payload["driverPhone"],
             operator_name,
+            contract_month,
             start_date,
             end_date,
             deposit,
+            rent,
             status,
         ),
     )
@@ -154,9 +171,11 @@ def rental_order_update(order_id):
         "driverName": "driver_name",
         "driverPhone": "driver_phone",
         "operatorName": "operator_name",
+        "contractMonth": "contract_month",
         "startDate": "start_date",
         "endDate": "end_date",
         "deposit": "deposit",
+        "rent": "rent",
         "status": "status",
         "remark": "remark",
     }
@@ -170,6 +189,28 @@ def rental_order_update(order_id):
 
     if not fields:
         return jsonify({"code": 400, "message": "no fields to update"}), 400
+
+    if "plate" in payload or "carType" in payload:
+        db = get_db()
+        cursor = db.execute(
+            "SELECT plate, car_type FROM rental_orders WHERE id = ?",
+            (order_id,),
+        )
+        current = cursor.fetchone()
+        if current is None:
+            return jsonify({"code": 404, "message": "rental order not found"}), 404
+        next_plate = payload.get("plate") or current["plate"]
+        next_car_type = payload.get("carType") or current["car_type"]
+        cursor = db.execute(
+            """
+            SELECT 1 FROM vehicles
+            WHERE plate = ? AND car_type = ?
+            LIMIT 1
+            """,
+            (next_plate, next_car_type),
+        )
+        if cursor.fetchone() is None:
+            return jsonify({"code": 400, "message": "vehicle not found in vehicles table"}), 400
 
     params.append(order_id)
     db = get_db()
@@ -238,6 +279,13 @@ def vehicle_create():
         return jsonify({"code": 400, "message": f"missing fields: {', '.join(missing)}"}), 400
 
     db = get_db()
+    cursor = db.execute(
+        "SELECT 1 FROM vehicles WHERE plate = ? LIMIT 1",
+        (payload["plate"],),
+    )
+    if cursor.fetchone() is not None:
+        return jsonify({"code": 400, "message": "plate already exists"}), 400
+
     cursor = db.execute(
         """
         INSERT INTO vehicles (plate, car_type, last_inspection, last_insurance, is_rented, condition_remark)

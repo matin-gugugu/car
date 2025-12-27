@@ -52,9 +52,11 @@ const CommonHeader = ({collapsed}) => {
                 onClick={() => setCollapse()}
             />
             <Dropdown menu={{ items }}>
-                
-              <Avatar size= {50} src={<img src={require("../../assets/user.png")} />} />
-                
+              <Avatar
+                size={50}
+                className="header-avatar"
+                src={<img src={require("../../assets/user.jpg")} />}
+              />
             </Dropdown>
             
 

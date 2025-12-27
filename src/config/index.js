@@ -10,7 +10,7 @@ export default  [
         path: '/rental-orders',
         name: 'rentalOrderManagement',
         label: '租赁订单管理',
-        icon: 'CarOutlined',
+        icon: 'FileSearchOutlined',
         url: '/rental-orders/index'
     },
     {

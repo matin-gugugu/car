@@ -3,3 +3,7 @@
     justify-content: space-between;
     align-items: center;
 }
+
+.header-avatar {
+    border-radius: 12px;
+}

@@ -176,6 +176,7 @@ const VehicleManagement = () => {
         getTableData(query);
       } catch (e) {
         console.error("保存失败:", e);
+        message.error(e?.response?.data?.message || "保存失败");
       }
     });
   };
