@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Button, Form, Input, Table, Modal, message, DatePicker, Tag, Select, Popover } from "antd";
+import { Button, Form, Input, Table, Modal, message, DatePicker, Tag, Select, Popover, Upload } from "antd";
+import { UploadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import http from "../../api/axios";
 import "./vehicleManagement.css";
@@ -241,7 +242,37 @@ const VehicleManagement = () => {
             <Button type="primary" htmlType="submit">查询</Button>
           </Form.Item>
         </Form>
-        <Button type="primary" onClick={openAddModal}>新增</Button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Upload
+            showUploadList={false}
+            accept=".csv"
+            beforeUpload={(file) => {
+              const formData = new FormData();
+              formData.append("file", file);
+              http
+                .request({
+                  url: "/import/vehicles",
+                  method: "post",
+                  data: formData,
+                  headers: { "Content-Type": "multipart/form-data" },
+                })
+                .then((res) => {
+                  message.success(`导入完成：新增${res.inserted || 0}，跳过${res.skipped || 0}`);
+                  if (res.errors && res.errors.length) {
+                    message.warning(`部分失败：${res.errors.slice(0, 3).join("；")}`);
+                  }
+                  getTableData(query);
+                })
+                .catch((e) => {
+                  message.error(e?.response?.data?.message || "导入失败");
+                });
+              return false;
+            }}
+          >
+            <Button icon={<UploadOutlined />}>导入</Button>
+          </Upload>
+          <Button type="primary" onClick={openAddModal}>新增</Button>
+        </div>
       </div>
       <Table
         columns={columns}

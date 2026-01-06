@@ -4,6 +4,8 @@ from db import get_db, init_db
 from seed import seed_if_empty
 import calendar
 import json
+import csv
+import io
 from datetime import date, datetime
 
 app = Flask(__name__)
@@ -77,6 +79,17 @@ def _ensure_rent_records(order_id, start_date_str, end_date_str):
         [(order_id, d.isoformat()) for d in wanted],
     )
     db.commit()
+
+
+def _read_csv_rows(file_storage):
+    raw = file_storage.stream.read()
+    text = raw.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = []
+    for row in reader:
+        cleaned = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
+        rows.append(cleaned)
+    return rows
 
 
 @app.get("/api/health")
@@ -305,6 +318,9 @@ def rent_record_list():
     plate = request.args.get("plate")
     driver_name = request.args.get("driverName")
     operator_name = request.args.get("operatorName")
+    car_type = request.args.get("carType")
+    rent_status = request.args.get("rentRecordStatus")
+    rent_due_month = request.args.get("rentDueMonth")
 
     db = get_db()
     clauses = []
@@ -318,6 +334,15 @@ def rent_record_list():
     if operator_name:
         clauses.append("r.operator_name LIKE ?")
         params.append(f"%{operator_name}%")
+    if car_type:
+        clauses.append("r.car_type LIKE ?")
+        params.append(f"%{car_type}%")
+    if rent_status:
+        clauses.append("rr.status = ?")
+        params.append(rent_status)
+    if rent_due_month:
+        clauses.append("rr.due_date LIKE ?")
+        params.append(f"{rent_due_month}%")
 
     where_sql = ""
     if clauses:
@@ -328,8 +353,6 @@ def rent_record_list():
         SELECT id, start_date, end_date
         FROM rental_orders
         """
-        + where_sql.replace("r.", ""),
-        params,
     )
     for row in order_cursor.fetchall():
         _ensure_rent_records(row["id"], row["start_date"], row["end_date"])
@@ -344,8 +367,9 @@ def rent_record_list():
                rr.status AS rentRecordStatus, rr.remark AS rentRecordRemark
         FROM rental_orders r
         JOIN rent_records rr ON rr.order_id = r.id
+        WHERE rr.status != 'deleted'
         """
-        + where_sql
+        + ((" AND " + " AND ".join(clauses)) if clauses else "")
         + " ORDER BY r.id ASC, rr.due_date ASC",
         params,
     )
@@ -391,11 +415,11 @@ def rent_record_delete(record_id):
     if row is None:
         return jsonify({"code": 404, "message": "rent record not found"}), 404
 
-    db.execute("DELETE FROM rent_records WHERE id = ?", (record_id,))
+    db.execute("UPDATE rent_records SET status = 'deleted' WHERE id = ?", (record_id,))
     db.commit()
 
     cursor = db.execute(
-        "SELECT COUNT(*) AS count FROM rent_records WHERE order_id = ?",
+        "SELECT COUNT(*) AS count FROM rent_records WHERE order_id = ? AND status != 'deleted'",
         (row["order_id"],),
     )
     remaining = cursor.fetchone()["count"]
@@ -409,6 +433,172 @@ def rental_order_delete_with_records(order_id):
     db.execute("DELETE FROM rental_orders WHERE id = ?", (order_id,))
     db.commit()
     return jsonify({"code": 200, "message": "deleted"})
+
+
+@app.post("/api/import/rent")
+def import_rent_data():
+    if "file" not in request.files:
+        return jsonify({"code": 400, "message": "file is required"}), 400
+    rows = _read_csv_rows(request.files["file"])
+    if not rows:
+        return jsonify({"code": 400, "message": "empty file"}), 400
+
+    db = get_db()
+    inserted_orders = 0
+    inserted_records = 0
+    skipped = 0
+    errors = []
+
+    for idx, row in enumerate(rows, start=2):
+        if row.get("rentDueDate"):
+            plate = row.get("plate", "")
+            car_type = row.get("carType", "")
+            due_date = row.get("rentDueDate", "")
+            status = row.get("status") or row.get("rentRecordStatus") or "unsettled"
+            remark = row.get("remark") or row.get("rentRecordRemark") or ""
+            if not plate or not due_date:
+                errors.append(f"line {idx}: rent record missing plate or rentDueDate")
+                continue
+
+            cursor = db.execute(
+                """
+                SELECT id FROM rental_orders
+                WHERE plate = ?
+                  AND (? = '' OR car_type = ?)
+                  AND start_date <= ?
+                  AND end_date > ?
+                ORDER BY start_date DESC
+                LIMIT 1
+                """,
+                (plate, car_type, car_type, due_date, due_date),
+            )
+            order = cursor.fetchone()
+            if order is None:
+                errors.append(f"line {idx}: no matching order for rentDueDate")
+                continue
+
+            cursor = db.execute(
+                """
+                INSERT OR IGNORE INTO rent_records (order_id, due_date, status, remark)
+                VALUES (?, ?, ?, ?)
+                """,
+                (order["id"], due_date, status, remark),
+            )
+            if cursor.rowcount == 0:
+                skipped += 1
+            else:
+                inserted_records += 1
+        elif row.get("startDate") or row.get("endDate"):
+            plate = row.get("plate", "")
+            car_type = row.get("carType", "")
+            driver_name = row.get("driverName", "")
+            driver_phone = row.get("driverPhone", "")
+            operator_name = row.get("operatorName", "")
+            start_date = row.get("startDate", "")
+            end_date = row.get("endDate", "")
+            deposit = row.get("deposit", "")
+            rent = row.get("rent", "")
+            if not plate or not car_type or not driver_name or not driver_phone:
+                errors.append(f"line {idx}: order missing required fields")
+                continue
+
+            cursor = db.execute(
+                """
+                SELECT 1 FROM vehicles
+                WHERE plate = ? AND car_type = ?
+                LIMIT 1
+                """,
+                (plate, car_type),
+            )
+            if cursor.fetchone() is None:
+                errors.append(f"line {idx}: vehicle not found in vehicles table")
+                continue
+
+            cursor = db.execute(
+                """
+                INSERT INTO rental_orders (
+                    plate, car_type, driver_name, driver_phone, operator_name,
+                    start_date, end_date, deposit, rent, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    plate,
+                    car_type,
+                    driver_name,
+                    driver_phone,
+                    operator_name,
+                    start_date,
+                    end_date,
+                    deposit,
+                    rent,
+                    "unsettled",
+                ),
+            )
+            inserted_orders += 1
+            _ensure_rent_records(cursor.lastrowid, start_date, end_date)
+        else:
+            errors.append(f"line {idx}: unknown row type")
+            continue
+
+    db.commit()
+    return jsonify(
+        {
+            "code": 200,
+            "insertedOrders": inserted_orders,
+            "insertedRecords": inserted_records,
+            "skipped": skipped,
+            "errors": errors,
+        }
+    )
+
+
+@app.post("/api/import/vehicles")
+def import_vehicles_data():
+    if "file" not in request.files:
+        return jsonify({"code": 400, "message": "file is required"}), 400
+    rows = _read_csv_rows(request.files["file"])
+    if not rows:
+        return jsonify({"code": 400, "message": "empty file"}), 400
+
+    db = get_db()
+    inserted = 0
+    skipped = 0
+    errors = []
+
+    for idx, row in enumerate(rows, start=2):
+        plate = row.get("plate", "")
+        car_type = row.get("carType", "")
+        if not plate or not car_type:
+            errors.append(f"line {idx}: vehicle missing plate or carType")
+            continue
+
+        cursor = db.execute(
+            "SELECT 1 FROM vehicles WHERE plate = ? LIMIT 1",
+            (plate,),
+        )
+        if cursor.fetchone() is not None:
+            skipped += 1
+            continue
+
+        db.execute(
+            """
+            INSERT INTO vehicles (plate, car_type, last_inspection, last_insurance, is_rented, condition_remark)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                plate,
+                car_type,
+                row.get("lastInspection") or "",
+                row.get("lastInsurance") or "",
+                int(row.get("isRented") or 0),
+                row.get("conditionRemark") or "",
+            ),
+        )
+        inserted += 1
+
+    db.commit()
+    return jsonify({"code": 200, "inserted": inserted, "skipped": skipped, "errors": errors})
 
 
 @app.get("/api/vehicles")

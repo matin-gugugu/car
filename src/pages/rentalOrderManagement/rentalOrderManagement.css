@@ -22,3 +22,7 @@
 .ant-table-wrapper .ant-table-tbody > tr.plate-shade-row:hover > td {
   background-color: #eaf2ff;
 }
+
+.plate-group-start > td {
+  border-top: 2px solid #e9edf3;
+}

@@ -25,10 +25,12 @@ The server runs on `http://localhost:5001`.
 - GET `/api/rent-records?plate=...&driverName=...&operatorName=...`
 - PUT `/api/rent-records/<id>`
 - DELETE `/api/rent-records/<id>`
+- POST `/api/import/rent` (CSV, auto-detect orders or rent records)
 - GET `/api/vehicles?plate=...&carType=...&isRented=0|1`
 - POST `/api/vehicles`
 - PUT `/api/vehicles/<id>`
 - DELETE `/api/vehicles/<id>`
+- POST `/api/import/vehicles` (CSV)
 
 ## Notes
 
